@@ -2,12 +2,106 @@
 
 import { useState, useRef, useEffect } from "react";
 
+
+//Integrated Syllabus Modal Component
+function SyllabusModal({ isOpen, onClose, onBlueprintReady }) {
+  const [syllabusText, setSyllabusText] = useState("");
+  const [targetRole, setTargetRole] = useState("AppSec Engineer");
+  const [difficulty, setDifficulty] = useState("Intermediate");
+  const [isParsing, setIsParsing] = useState(false);
+
+  if (!isOpen) return null;
+
+  const handleParse = async () => {
+    setIsParsing(true);
+    try {
+      const res = await fetch("/api/syllabus-parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ syllabusText, targetRole, difficulty }),
+      });
+      const data = await res.json();
+      if (data.blueprint) {
+        onBlueprintReady(data.blueprint);
+        onClose();
+      } else {
+        alert(data.error || "Failed to parse syllabus.");
+      }
+    } catch (err) {
+      alert("Error parsing syllabus.");
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 text-slate-100 shadow-2xl">
+        <h2 className="text-lg font-semibold text-indigo-300 mb-1">
+          Configure Exam Blueprint
+        </h2>
+        <p className="text-xs text-slate-400 mb-4">
+          Paste your syllabus topics or course outline. Agent 1 will extract core concepts and configure the examiner.
+        </p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Target Role / Subject
+            </label>
+            <input
+              type="text"
+              value={targetRole}
+              onChange={(e) => setTargetRole(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Syllabus / Key Topics Text
+            </label>
+            <textarea
+              rows={5}
+              value={syllabusText}
+              onChange={(e) => setSyllabusText(e.target.value)}
+              placeholder="e.g., OWASP Top 10, SQL Injection, IDOR, CORS Misconfigurations, JWT Security, XSS, Rate Limiting..."
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div className="flex justify-between items-center pt-2">
+            <button
+              onClick={onClose}
+              className="text-xs text-slate-400 hover:text-white px-3 py-2"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleParse}
+              disabled={isParsing || !syllabusText.trim()}
+              className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium px-4 py-2 rounded-lg transition"
+            >
+              {isParsing ? "Analyzing Syllabus..." : "Generate Exam Blueprint"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function PrepLiveArena() {
   // Session Configuration & Persona State
   const [persona, setPersona] = useState("STRICT_PROFESSOR");
   const [callState, setCallState] = useState("idle"); // "idle" | "connecting" | "live" | "speaking"
+  const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false);
+  const [activeBlueprint, setActiveBlueprint] = useState(null);
   const [showTranscript, setShowTranscript] = useState(false);
   const [transcript, setTranscript] = useState([]);
+
+  const [latestEval, setLatestEval] = useState(null);
+  const [isEvaluating, setIsEvaluating] = useState(false);
 
   // WebSockets & Audio Context Refs
   const wsRef = useRef(null);
@@ -16,6 +110,9 @@ export default function PrepLiveArena() {
   const processorRef = useRef(null);
   const mediaStreamRef = useRef(null);
   const nextStartTimeRef = useRef(0);
+
+  //Tracks current question for Agent 3 context evaluation
+  const lastExaminerQuestionRef = useRef("");
 
   // Clean up WebSockets & Audio Nodes on Unmount
   useEffect(() => {
@@ -28,9 +125,14 @@ export default function PrepLiveArena() {
   const startCall = async () => {
     try {
       setCallState("connecting");
+      setLatestEval(null);
 
       // 1. Fetch Session System Instructions from Next.js API route
-      const configRes = await fetch(`/api/prep-session?persona=${persona}`);
+      const configRes = await fetch(`/api/prep-session?persona=${persona}`, {
+        method: 'POST',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blueprint: activeBlueprint }),
+      });
       const { config } = await configRes.json();
 
       const apiKey = process.env.NEXT_PUBLIC_GEMINI_API_KEY;
@@ -60,6 +162,11 @@ export default function PrepLiveArena() {
         // Step A: Send Handshake Setup Payload
         ws.send(JSON.stringify({ setup: config }));
 
+        // Send initial trigger turn to force Gemini to open the viva session
+        const openingPrompt = activeBlueprint?.subjectTitle
+          ? `The candidate has joined the call for the ${activeBlueprint.subjectTitle} viva session. Please introduce yourself briefly and ask the first scenario question.`
+          : "The candidate has joined the call. Please start the prep. session now with your welcoming opener and introductory question.";
+
         // Step B: Explicitly trigger Gemini to speak the opening line
         ws.send(
           JSON.stringify({
@@ -69,7 +176,8 @@ export default function PrepLiveArena() {
                   role: "user",
                   parts: [
                     {
-                      text: "The candidate has joined the call. Please start the interview session now with your welcoming opening statement and introductory question.",
+                      //text: "The candidate has joined the call. Please start the interview session now with your welcoming opener and introductory question.",
+                      text: openingPrompt
                     },
                   ],
                 },
@@ -121,12 +229,26 @@ export default function PrepLiveArena() {
             }
             if (part.text) {
               // Append text snippet if available in stream
+              lastExaminerQuestionRef.current = part.text;
               appendTranscript("examiner", part.text);
             }
           }
         }
 
-        // Step D: Handle Native Interruption (Candidate spoke while Examiner was answering)
+        //Capture candidate speech transcript turns if generated by WebSocket
+        if (response.serverContent?.turnComplete && response.serverContent?.userTurn?.parts) {
+          const userText = response.serverContent.userTurn.parts.map((p) => p.text).join(" ");
+          if (userText) {
+            setTranscript((prev) => [
+              ...prev,
+              { role: "candidate", text: userText, timestamp: new Date().toLocaleTimeString() },
+            ]);
+            // Trigger Agent 3 Evaluation
+            runTurnEvaluation(userText);
+          }
+        }
+
+        //Step D: Handle Native Interruption (Candidate spoke while Examiner was answering)
         if (response.serverContent?.interrupted) {
           console.log("Interrupted by candidate! Flushing audio queue...");
           flushAudioPlayback();
@@ -153,6 +275,59 @@ export default function PrepLiveArena() {
     } catch (err) {
       console.error("Failed to start session:", err);
       setCallState("idle");
+    }
+  };
+
+  //Async Turn Evaluation Execution
+  const runTurnEvaluation = async (studentAnswerText) => {
+    if (!studentAnswerText || !studentAnswerText.trim()) return;
+
+    setIsEvaluating(true);
+    try {
+      const res = await fetch("/api/eval-turn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentResponse: studentAnswerText,
+          currentQuestion: lastExaminerQuestionRef.current || "General Technical Viva Question",
+          blueprint: activeBlueprint,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.evaluation) {
+        setLatestEval(data.evaluation);
+
+        //Auto-probing Trigger: If answer is weak/bluffing, send context direction to Live Examiner
+        if (
+          (data.evaluation.isBluffingOrVague || data.evaluation.recommendedAction === "PROBE_DEEPER") &&
+          wsRef.current &&
+          wsRef.current.readyState === WebSocket.OPEN
+        ) {
+          const probeInstruction = {
+            clientContent: {
+              turns: [
+                {
+                  role: "user",
+                  parts: [
+                    {
+                      text: `[SYSTEM INSTRUCTION FROM EVALUATOR AGENT]: The candidate gave a shallow or vague answer. Do not accept generalities. Probe deeper using this direction: "${
+                        data.evaluation.suggestedFollowUp || "Ask them to explain the precise implementation details."
+                      }"`,
+                    },
+                  ],
+                },
+              ],
+              turnComplete: true,
+            },
+          };
+          wsRef.current.send(JSON.stringify(probeInstruction));
+        }
+      }
+    } catch (err) {
+      console.error("Agent 3 Evaluation Error:", err);
+    } finally {
+      setIsEvaluating(false);
     }
   };
 
@@ -351,7 +526,65 @@ export default function PrepLiveArena() {
           <option value="FRIENDLY_TUTOR">Friendly Tutor</option>
           <option value="EMPATHETIC_MANAGER">Empathetic Manager</option>
         </select>
+
+        {/* Topic/Material Selector Window */}
+        <button
+          onClick={() => setIsSyllabusModalOpen(true)}
+          className="text-xs bg-slate-900 border border-slate-800 hover:border-slate-700 px-3 py-1.5 rounded-lg text-indigo-300 flex items-center gap-1.5 transition"
+        >
+          <span>📚 Blueprint:</span>
+          <span className="font-semibold text-slate-200">
+            {activeBlueprint?.subjectTitle || "Default Syllabus"}
+          </span>
+        </button>
       </header>
+
+      {/* Agent 3 Real-time Evaluation HUD */}
+      {callState === "live" && (
+        <div className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl backdrop-blur-md space-y-2">
+          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+              <span>🛡️ Agent 3 Observer</span>
+              {isEvaluating && <span className="text-indigo-400 animate-pulse text-[10px]">(Analyzing...)</span>}
+            </span>
+
+            {latestEval && (
+              <span
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                  latestEval.isBluffingOrVague
+                    ? "bg-amber-950/60 border-amber-800 text-amber-300"
+                    : "bg-emerald-950/60 border-emerald-800 text-emerald-300"
+                }`}
+              >
+                {latestEval.isBluffingOrVague ? "⚠️ Low Depth / Vague" : "✓ Solid Defense"}
+              </span>
+            )}
+          </div>
+
+          {latestEval ? (
+            <div className="flex items-center justify-between text-xs pt-1">
+              <div>
+                <p className="text-slate-300 font-medium">{latestEval.evaluationSummary}</p>
+                {latestEval.missingKeyPoints?.length > 0 && (
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Missing: {latestEval.missingKeyPoints.join(", ")}
+                  </p>
+                )}
+              </div>
+              <div className="text-right pl-4">
+                <span className="text-lg font-bold text-indigo-400">
+                  {latestEval.technicalAccuracy}/10
+                </span>
+                <span className="block text-[10px] text-slate-500">Depth Score</span>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs text-slate-500 italic text-center py-1">
+              Listening to answer to compute technical depth...
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Center Interactive Call Orb */}
       <main className="flex-1 flex flex-col items-center justify-center z-10 my-8">
@@ -444,6 +677,14 @@ export default function PrepLiveArena() {
           Native Bidirectional Audio streaming over Gemini Multimodal Live API
         </p>
       </footer>
+
+      {/* Syllabus Modal */}
+      <SyllabusModal
+        isOpen={isSyllabusModalOpen}
+        onClose={() => setIsSyllabusModalOpen(false)}
+        onBlueprintReady={(bp) => setActiveBlueprint(bp)}
+        activeBlueprint={activeBlueprint}
+      />
 
       {/* Collapsible Live Transcript Drawer */}
       {showTranscript && (
