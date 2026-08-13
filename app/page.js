@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from "react";
 
 
 //Integrated Syllabus Modal Component
-function SyllabusModal({ isOpen, onClose, onBlueprintReady }) {
+function SyllabusModal({ isOpen, onClose, onBlueprintReady, persona }) {
   const [syllabusText, setSyllabusText] = useState("");
   const [targetRole, setTargetRole] = useState("AppSec Engineer");
   const [difficulty, setDifficulty] = useState("Intermediate");
@@ -18,7 +18,7 @@ function SyllabusModal({ isOpen, onClose, onBlueprintReady }) {
       const res = await fetch("/api/syllabus-parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ syllabusText, targetRole, difficulty }),
+        body: JSON.stringify({ syllabusText, targetRole, difficulty, persona }),
       });
       const data = await res.json();
       if (data.blueprint) {
@@ -91,10 +91,78 @@ function SyllabusModal({ isOpen, onClose, onBlueprintReady }) {
   );
 }
 
+
+function RemediationModal({ isOpen, onClose, drill, isLoading }) {
+  const [showSolution, setShowSolution] = useState(false);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-xl w-full p-6 text-slate-100 shadow-2xl space-y-4">
+        <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+          <h3 className="text-sm font-bold text-indigo-400 flex items-center gap-2">
+            <span>⚡ Remediation Drill Agent</span>
+          </h3>
+          <button onClick={onClose} className="text-xs text-slate-400 hover:text-white">
+            ✕
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="py-12 text-center text-xs text-slate-400 space-y-2">
+            <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
+            <p>Generating custom remediation exercise for your gaps...</p>
+          </div>
+        ) : drill ? (
+          <div className="space-y-4 text-xs">
+            <div>
+              <h4 className="font-semibold text-slate-200 text-sm">{drill.drillTitle}</h4>
+              <p className="text-slate-400 mt-1 leading-relaxed">{drill.conceptExplanation}</p>
+            </div>
+
+            {drill.vulnerableCodeSnippet && (
+              <div className="space-y-1">
+                <span className="font-medium text-amber-400">Target Code Snippet:</span>
+                <pre className="bg-slate-950 border border-slate-800 p-3 rounded-lg overflow-x-auto text-[11px] font-mono text-slate-300">
+                  {drill.vulnerableCodeSnippet}
+                </pre>
+              </div>
+            )}
+
+            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-lg space-y-1">
+              <span className="font-semibold text-indigo-300">Exercise Task:</span>
+              <p className="text-slate-300 leading-relaxed">{drill.drillInstructions}</p>
+            </div>
+
+            {showSolution ? (
+              <div className="p-3 bg-emerald-950/40 border border-emerald-800/50 rounded-lg space-y-1">
+                <span className="font-semibold text-emerald-400">Model Solution:</span>
+                <p className="text-emerald-200 whitespace-pre-wrap font-mono text-[11px]">
+                  {drill.modelSolution}
+                </p>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowSolution(true)}
+                className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 py-2 rounded-lg font-medium transition"
+              >
+                Show Solution & Guidance
+              </button>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-rose-400">Failed to load drill.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function PrepLiveArena() {
   // Session Configuration & Persona State
   const [persona, setPersona] = useState("STRICT_PROFESSOR");
-  const [callState, setCallState] = useState("idle"); // "idle" | "connecting" | "live" | "speaking"
+  const [callState, setCallState] = useState("idle"); // "idle" | "connecting" | "live" | "speaking" | "scorecard"
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false);
   const [activeBlueprint, setActiveBlueprint] = useState(null);
   const [showTranscript, setShowTranscript] = useState(false);
@@ -102,6 +170,15 @@ export default function PrepLiveArena() {
 
   const [latestEval, setLatestEval] = useState(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
+
+  // Agent 4: Scorecard State
+  const [scorecard, setScorecard] = useState(null);
+  const [isGeneratingScorecard, setIsGeneratingScorecard] = useState(false);
+
+  // Agent 5: Remediation State
+  const [activeDrill, setActiveDrill] = useState(null);
+  const [isDrillModalOpen, setIsDrillModalOpen] = useState(false);
+  const [isGeneratingDrill, setIsGeneratingDrill] = useState(false);
 
   // WebSockets & Audio Context Refs
   const wsRef = useRef(null);
@@ -113,6 +190,7 @@ export default function PrepLiveArena() {
 
   //Tracks current question for Agent 3 context evaluation
   const lastExaminerQuestionRef = useRef("");
+  const currentTurnTextBuffer = useRef("");
 
   // Clean up WebSockets & Audio Nodes on Unmount
   useEffect(() => {
@@ -126,6 +204,8 @@ export default function PrepLiveArena() {
     try {
       setCallState("connecting");
       setLatestEval(null);
+      setScorecard(null);
+      setTranscript([]);
 
       // 1. Fetch Session System Instructions from Next.js API route
       const configRes = await fetch(`/api/prep-session?persona=${persona}`, {
@@ -228,25 +308,66 @@ export default function PrepLiveArena() {
               playAudioChunk24kHz(part.inlineData.data);
             }
             if (part.text) {
-              // Append text snippet if available in stream
+              //Append text snippet if available in stream
               lastExaminerQuestionRef.current = part.text;
               appendTranscript("examiner", part.text);
             }
           }
         }
 
-        //Capture candidate speech transcript turns if generated by WebSocket
-        if (response.serverContent?.turnComplete && response.serverContent?.userTurn?.parts) {
-          const userText = response.serverContent.userTurn.parts.map((p) => p.text).join(" ");
-          if (userText) {
+        if(response.serverContent?.outputTranscription?.text) {
+          currentTurnTextBuffer.current += response.serverContent.outputTranscription.text;
+        }
+
+        //Flush Examiner/Model Sentence when Turn Completes
+        if (response.serverContent?.turnComplete) {
+          const completedText = currentTurnTextBuffer.current.trim();
+          if (completedText) {
+            lastExaminerQuestionRef.current = completedText;
             setTranscript((prev) => [
               ...prev,
-              { role: "candidate", text: userText, timestamp: new Date().toLocaleTimeString() },
+              {
+                role: "examiner",
+                text: completedText,
+                timestamp: new Date().toLocaleTimeString(),
+              },
             ]);
-            // Trigger Agent 3 Evaluation
-            runTurnEvaluation(userText);
+            currentTurnTextBuffer.current = "";   //Clear the buffer for next turn
           }
         }
+
+        // 4. Handle Candidate / User Speech Transcription (inputTranscription)
+        if (response.serverContent?.inputTranscription?.text) {
+          const candidateText = response.serverContent.inputTranscription.text.trim();
+
+          if (candidateText) {
+            setTranscript((prev) => [
+              ...prev,
+              {
+                role: "candidate",
+                text: candidateText,
+                timestamp: new Date().toLocaleTimeString(),
+              },
+            ]);
+
+            //Trigger Evaluation Agent in background
+            runTurnEvaluation(candidateText);
+          }
+        }
+
+        // //Capture candidate speech transcript turns if generated by WebSocket
+        // if (response.serverContent?.turnComplete && response.serverContent?.userTurn?.parts) {
+        //   const userText = response.serverContent.userTurn.parts.map((p) => p.text).join(" ");
+        //   console.log("User just said-> ", userText);
+        //   if (userText) {
+        //     setTranscript((prev) => [
+        //       ...prev,
+        //       { role: "candidate", text: userText, timestamp: new Date().toLocaleTimeString() },
+        //     ]);
+        //     // Trigger Agent 3 Evaluation
+        //     runTurnEvaluation(userText);
+        //   }
+        // }
 
         //Step D: Handle Native Interruption (Candidate spoke while Examiner was answering)
         if (response.serverContent?.interrupted) {
@@ -328,6 +449,57 @@ export default function PrepLiveArena() {
       console.error("Agent 3 Evaluation Error:", err);
     } finally {
       setIsEvaluating(false);
+    }
+  };
+
+
+  //Agent: Generate Scorecard
+  const generateScorecard = async (finalTranscripts) => {
+    setIsGeneratingScorecard(true);
+    setCallState("scorecard");
+    try {
+      const res = await fetch("/api/generate-scorecard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          transcripts: finalTranscripts,
+          blueprint: activeBlueprint,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.scorecard) {
+        setScorecard(data.scorecard);
+      }
+    } catch (err) {
+      console.error("Scorecard Generation Error:", err);
+    } finally {
+      setIsGeneratingScorecard(false);
+    }
+  };
+
+  //Agent: Launch Drill
+  const handleLaunchDrill = async (topicName, gaps) => {
+    setIsDrillModalOpen(true);
+    setIsGeneratingDrill(true);
+    try {
+      const res = await fetch("/api/generate-drill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topicName: topicName || "General Web Security",
+          criticalGaps: gaps || ["Concept Implementation"],
+        }),
+      });
+
+      const data = await res.json();
+      if (data.drill) {
+        setActiveDrill(data.drill);
+      }
+    } catch (err) {
+      console.error("Drill Generation Error:", err);
+    } finally {
+      setIsGeneratingDrill(false);
     }
   };
 
@@ -492,8 +664,12 @@ export default function PrepLiveArena() {
     }
 
     nextStartTimeRef.current = 0;
+    currentTurnTextBuffer.current = "";
 
     setCallState("idle");
+    
+    //Trigger Scorecard Generation Agent
+    generateScorecard(transcript);
   };
 
   return (
@@ -540,11 +716,11 @@ export default function PrepLiveArena() {
       </header>
 
       {/* Agent 3 Real-time Evaluation HUD */}
-      {callState === "live" && (
+      {callState !== "scorecard" && (callState === "live" || callState === "speaking") && (
         <div className="w-full bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-xl backdrop-blur-md space-y-2">
           <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
             <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
-              <span>🛡️ Agent 3 Observer</span>
+              <span>🛡️ Co-Examiner Observer Agent</span>
               {isEvaluating && <span className="text-indigo-400 animate-pulse text-[10px]">(Analyzing...)</span>}
             </span>
 
@@ -634,6 +810,142 @@ export default function PrepLiveArena() {
         </div>
       </main>
 
+
+      {/* VIEW B: Agent 4 Scorecard & Agent 5 Remediation Dashboard */}
+      {callState === "scorecard" && (
+        <section className="my-auto w-full max-w-3xl mx-auto space-y-6">
+          {isGeneratingScorecard ? (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
+              <div className="w-10 h-10 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
+              <h2 className="text-base font-semibold text-indigo-400">
+                Agent 4: Compiling Official Viva Scorecard...
+              </h2>
+              <p className="text-xs text-slate-400">
+                Analyzing session transcripts against blueprint metrics and technical accuracy standards.
+              </p>
+            </div>
+          ) : scorecard ? (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-6">
+              {/* Scorecard Header */}
+              <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div>
+                  <span className="text-xs text-indigo-400 font-semibold uppercase tracking-wider">
+                    Agent 4 Viva Assessment
+                  </span>
+                  <h2 className="text-xl font-bold text-slate-100 mt-0.5">
+                    {activeBlueprint?.subjectTitle || "Web Security"} Evaluation Scorecard
+                  </h2>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="text-right">
+                    <span className="text-3xl font-extrabold text-indigo-400">
+                      {scorecard.overallScore}%
+                    </span>
+                    <span className="block text-[10px] text-slate-400 uppercase">Overall Score</span>
+                  </div>
+                  <span
+                    className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                      scorecard.verdict === "PASS"
+                        ? "bg-emerald-950/80 border-emerald-800 text-emerald-300"
+                        : "bg-amber-950/80 border-amber-800 text-amber-300"
+                    }`}
+                  >
+                    {scorecard.verdict}
+                  </span>
+                </div>
+              </div>
+
+              {/* Executive Summary */}
+              <div className="p-3.5 bg-slate-950/80 border border-slate-800/80 rounded-xl space-y-1 text-xs">
+                <span className="font-semibold text-slate-300">Executive Summary:</span>
+                <p className="text-slate-400 leading-relaxed">{scorecard.executiveSummary}</p>
+              </div>
+
+              {/* Strengths & Critical Gaps */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                <div className="p-4 bg-emerald-950/20 border border-emerald-800/40 rounded-xl space-y-2">
+                  <h3 className="font-semibold text-emerald-400 flex items-center gap-1.5">
+                    <span>✓ Identified Strengths</span>
+                  </h3>
+                  <ul className="list-disc list-inside space-y-1 text-slate-300">
+                    {scorecard.strengths?.map((s, i) => (
+                      <li key={i}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="p-4 bg-amber-950/20 border border-amber-800/40 rounded-xl space-y-2">
+                  <h3 className="font-semibold text-amber-400 flex items-center gap-1.5">
+                    <span>⚠️ Concept Gaps</span>
+                  </h3>
+                  <ul className="list-disc list-inside space-y-1 text-slate-300">
+                    {scorecard.criticalGaps?.map((g, i) => (
+                      <li key={i}>{g}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+
+              {/* Topic Breakdown & Remediation Launch Buttons */}
+              <div className="space-y-3">
+                <h3 className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  Module Breakdown & Remediation Drills
+                </h3>
+                <div className="space-y-2">
+                  {scorecard.topicBreakdown?.map((topic, i) => (
+                    <div
+                      key={i}
+                      className="bg-slate-950 border border-slate-800/80 p-3 rounded-xl flex items-center justify-between text-xs"
+                    >
+                      <div className="space-y-1 max-w-[65%]">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-slate-200">{topic.topicName}</span>
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.2 rounded border ${
+                              topic.status === "MASTERED"
+                                ? "bg-emerald-950 border-emerald-800 text-emerald-400"
+                                : "bg-amber-950 border-amber-800 text-amber-400"
+                            }`}
+                          >
+                            {topic.status}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400">{topic.feedback}</p>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-slate-200">{topic.score}%</span>
+                        <button
+                          onClick={() => handleLaunchDrill(topic.topicName, scorecard.criticalGaps)}
+                          className="bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/40 text-indigo-300 px-3 py-1.5 rounded-lg text-[11px] font-medium transition"
+                        >
+                          ⚡ Practice Drill
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Restart Call Action */}
+              <div className="pt-2 text-center">
+                <button
+                  onClick={() => setCallState("idle")}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs px-6 py-2.5 rounded-xl transition"
+                >
+                  Roast me again!
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-12 text-xs text-rose-400">
+              Failed to generate scorecard. <button onClick={() => setCallState("idle")}>Try again</button>
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Call Control Footer */}
       <footer className="w-full max-w-lg flex flex-col items-center gap-4 z-10">
         <div className="flex items-center gap-6 w-full justify-center">
@@ -684,6 +996,15 @@ export default function PrepLiveArena() {
         onClose={() => setIsSyllabusModalOpen(false)}
         onBlueprintReady={(bp) => setActiveBlueprint(bp)}
         activeBlueprint={activeBlueprint}
+        persona={persona}
+      />
+
+      {/* Remediation Drill Modal */}
+      <RemediationModal
+        isOpen={isDrillModalOpen}
+        onClose={() => setIsDrillModalOpen(false)}
+        drill={activeDrill}
+        isLoading={isGeneratingDrill}
       />
 
       {/* Collapsible Live Transcript Drawer */}

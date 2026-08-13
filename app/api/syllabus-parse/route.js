@@ -23,7 +23,7 @@ export async function POST(request) {
 You are an expert technical curriculum designer. Analyze the following syllabus/study material and output a structured JSON object representing an Exam Blueprint for an oral viva.
 
 Target Role: ${targetRole || "Application Security Engineer"}
-Difficulty Level: ${difficulty || "Intermediate"}
+Difficulty Level: ${difficulty || "Beginner"}
 Examiner Persona Style: ${persona || "STRICT_PROFESSOR"}
 
 Syllabus Content:
