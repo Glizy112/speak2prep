@@ -22,8 +22,8 @@ Candidate Spoken Answer: "${studentResponse}"
 
 Analyze the answer and output ONLY a valid JSON object matching this schema (no markdown, no backticks):
 {
-  "technicalAccuracy": 8, // Score out of 10
-  "isBluffingOrVague": false, // true if candidate uses buzzwords without explaining mechanisms
+  "technicalAccuracy": 8, //Score out of 10
+  "isBluffingOrVague": false, //true if candidate uses buzzwords without explaining mechanisms
   "missingKeyPoints": ["List of critical missing details, if any"],
   "evaluationSummary": "Brief 1-sentence assessment of their response",
   "recommendedAction": "PROBE_DEEPER" | "MOVE_NEXT_TOPIC" | "CORRECT_MISCONCEPTION",

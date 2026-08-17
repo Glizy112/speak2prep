@@ -22,7 +22,7 @@ ${JSON.stringify(transcripts, null, 2)}
 
 Analyze the entire viva exchange and output ONLY a valid JSON object matching this schema (no markdown formatting, no backticks):
 {
-  "overallScore": 78, // Percentage out of 100
+  "overallScore": 78, //Percentage out of 100
   "verdict": "PASS" | "NEEDS_REVISION" | "FAIL",
   "executiveSummary": "Concise 2-sentence summary of overall candidate standing.",
   "strengths": ["List of 2-3 demonstrated technical strengths"],
@@ -30,14 +30,14 @@ Analyze the entire viva exchange and output ONLY a valid JSON object matching th
   "topicBreakdown": [
     {
       "topicName": "Topic Name from Blueprint",
-      "score": 85, // 0-100
+      "score": 85, //0-100
       "status": "MASTERED" | "PARTIAL" | "DEFICIENT",
       "feedback": "1-sentence specific observation"
     }
   ],
   "communicationMetrics": {
-    "clarityScore": 8, // Out of 10
-    "bluffCount": 1, // Number of times vague/buzzword-heavy answers were used
+    "clarityScore": 8, //Out of 10
+    "bluffCount": 1, //Number of times vague/buzzword-heavy answers were used
     "pacing": "CONFIDENT" | "HESITANT" | "RUSHY"
   }
 }

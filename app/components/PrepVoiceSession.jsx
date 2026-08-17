@@ -25,17 +25,17 @@ export default function VivaVoiceSession() {
         setIsConnected(true);
         setStatus('Session Live - Speak into your mic');
 
-        // Step 1: Handshake - Send Setup Payload
+        //Step 1: Handshake - Send Setup Payload
         ws.send(JSON.stringify({ setup: config }));
 
-        // Step 2: Start capture from User Microphone
+        //Step 2: Start capture from User Microphone
         initMicrophoneStream(ws);
       };
 
       ws.onmessage = async (event) => {
         const response = JSON.parse(event.data);
 
-        // Step 3: Play incoming 24kHz Audio Chunks from Gemini
+        //Step 3: Play incoming 24kHz Audio Chunks from Gemini
         if (response.serverContent?.modelTurn?.parts) {
           for (const part of response.serverContent.modelTurn.parts) {
             if (part.inlineData?.mimeType?.startsWith('audio/pcm')) {
@@ -44,7 +44,7 @@ export default function VivaVoiceSession() {
           }
         }
 
-        // Handle native interruption (if user talks while examiner speaks)
+        //Handle native interruption (if user talks while examiner speaks)
         if (response.serverContent?.interrupted) {
           console.log('Interrupted - Stopping audio playback buffer');
         }
@@ -65,7 +65,7 @@ export default function VivaVoiceSession() {
     }
   };
 
-  // Record microphone input & stream 16kHz PCM chunks
+  //Record microphone input & stream 16kHz PCM chunks
   const initMicrophoneStream = async (ws) => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const audioCtx = new (window.AudioContext || window?.webkitAudioContext)({ sampleRate: 16000 });
@@ -77,7 +77,7 @@ export default function VivaVoiceSession() {
     processor.onaudioprocess = (e) => {
       if (ws.readyState === WebSocket.OPEN) {
         const inputData = e.inputBuffer.getChannelData(0);
-        // Convert Float32 to Int16 PCM Buffer
+        //Convert Float32 to Int16 PCM Buffer
         const pcm16 = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
           pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7fff;
@@ -87,7 +87,7 @@ export default function VivaVoiceSession() {
           String.fromCharCode(...new Uint8Array(pcm16.buffer))
         );
 
-        // Stream audio chunk to Gemini Live API
+        //Stream audio chunk to Gemini Live API
         ws.send(
           JSON.stringify({
             realtimeInput: {
@@ -107,10 +107,10 @@ export default function VivaVoiceSession() {
     processor.connect(audioCtx.destination);
   };
 
-  // Play audio response chunks
+  //Play audio response chunks
   const playAudioChunk = (base64PCM) => {
-    // Decoding and scheduling PCM24/24kHz playback via Web Audio API
-    // (Standard AudioBuffer source node setup)
+    //Decoding and scheduling PCM24/24kHz playback via Web Audio API
+    //(Standard AudioBuffer source node setup)
   };
 
   const endSession = () => {

@@ -23,7 +23,7 @@ export async function POST(req) {
     const rawHistory = formData.get("history") || "[]";
     const history = JSON.parse(rawHistory);
 
-    // 1. Convert Audio to Text via ElevenLabs Scribe API
+    //1. Convert Audio to Text via ElevenLabs Scribe API
     const scribeFormData = new FormData();
     scribeFormData.append("file", audioBlob, "recording.webm");
     scribeFormData.append("model_id", "scribe_v2");
@@ -41,14 +41,14 @@ export async function POST(req) {
       const scribeData = await scribeRes.json();
       candidateText = scribeData.text;
     } else {
-      // Fallback if audio file is empty or fails
+      //Fallback if audio file is empty or fails
       candidateText = "[Candidate remained silent or speech was unclear]";
     }
 
-    // 2. Call Gemini 2.5 Flash / Flash Lite with system prompt and history
+    //2. Call Gemini 2.5 Flash / Flash Lite with system prompt and history
     const formattedSystemPrompt = SYSTEM_PROMPT.replace("{{PERSONA_MODE}}", persona);
 
-    // Using Gemini 2.5 Flash Lite / Flash for low latency
+    //Using Gemini 2.5 Flash Lite / Flash for low latency
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: [

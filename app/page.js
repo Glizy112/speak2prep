@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-
+import { useAuth } from "./context/AuthContext";
+import LoginModal from "./components/LoginModal";
+import { checkAndIncrementCallLimit } from "./service/firebase/firestore";
 
 //Integrated Syllabus Modal Component
 function SyllabusModal({ isOpen, onClose, onBlueprintReady, persona }) {
@@ -160,9 +162,9 @@ function RemediationModal({ isOpen, onClose, drill, isLoading }) {
 }
 
 export default function PrepLiveArena() {
-  // Session Configuration & Persona State
+  //Session Configuration & Persona State
   const [persona, setPersona] = useState("STRICT_PROFESSOR");
-  const [callState, setCallState] = useState("idle"); // "idle" | "connecting" | "live" | "speaking" | "scorecard"
+  const [callState, setCallState] = useState("idle"); //"idle" | "connecting" | "live" | "speaking" | "scorecard"
   const [isSyllabusModalOpen, setIsSyllabusModalOpen] = useState(false);
   const [activeBlueprint, setActiveBlueprint] = useState(null);
   const [showTranscript, setShowTranscript] = useState(false);
@@ -171,16 +173,20 @@ export default function PrepLiveArena() {
   const [latestEval, setLatestEval] = useState(null);
   const [isEvaluating, setIsEvaluating] = useState(false);
 
-  // Agent 4: Scorecard State
+  //Agent 4: Scorecard State
   const [scorecard, setScorecard] = useState(null);
   const [isGeneratingScorecard, setIsGeneratingScorecard] = useState(false);
 
-  // Agent 5: Remediation State
+  //Agent 5: Remediation State
   const [activeDrill, setActiveDrill] = useState(null);
   const [isDrillModalOpen, setIsDrillModalOpen] = useState(false);
   const [isGeneratingDrill, setIsGeneratingDrill] = useState(false);
 
-  // WebSockets & Audio Context Refs
+  //Auth State & Config
+  const { user, signout } = useAuth();
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+
+  //WebSockets & Audio Context Refs
   const wsRef = useRef(null);
   const inputAudioCtxRef = useRef(null);
   const outputAudioCtxRef = useRef(null);
@@ -192,14 +198,42 @@ export default function PrepLiveArena() {
   const lastExaminerQuestionRef = useRef("");
   const currentTurnTextBuffer = useRef("");
 
-  // Clean up WebSockets & Audio Nodes on Unmount
+  //Clean up WebSockets & Audio Nodes on Unmount
   useEffect(() => {
     return () => {
       endCall();
     };
   }, []);
 
-  // Initialize Gemini Live WebSocket Session
+  //Check auth'd user to start the call
+  const handleStartCall = async() => {
+    console.log(scorecard)
+    if (!user) {
+      setIsLoginModalOpen(true);
+      return;
+    }
+    try {
+      //Check & increment limit in Firestore via transaction
+      const { allowed, remainingCalls, tier, data } = await checkAndIncrementCallLimit(user?.uid);
+      //console.log(tier)
+      console.log(data)
+      if(!allowed) {
+        tier === "free" ?
+        alert("You have reached your limit of 2 free prep session calls for this week!")
+        : alert("You have reached your limit of 5 free prep session calls for this week!");
+        return;
+      }
+      
+      console.log(`Call permitted! Remaining calls this week: ${remainingCalls}`);
+      
+      startCall();
+    } catch(error) {
+      console.error("Failed to verify call limit:", err);
+      alert("Unable to verify call limit. Please try again.");
+    }
+  };
+
+  //Initialize Gemini Live WebSocket Session
   const startCall = async () => {
     try {
       setCallState("connecting");
@@ -207,7 +241,7 @@ export default function PrepLiveArena() {
       setScorecard(null);
       setTranscript([]);
 
-      // 1. Fetch Session System Instructions from Next.js API route
+      //1. Fetch Session System Instructions from Next.js API route
       const configRes = await fetch(`/api/prep-session?persona=${persona}`, {
         method: 'POST',
         headers: { "Content-Type": "application/json" },
@@ -222,7 +256,7 @@ export default function PrepLiveArena() {
         return;
       }
 
-      // Gemini Multimodal Live API WebSocket Endpoint
+      //Gemini Multimodal Live API WebSocket Endpoint
       const wsUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
 
       const ws = new WebSocket(wsUrl);
@@ -231,7 +265,7 @@ export default function PrepLiveArena() {
       ws.onopen = async() => {
         setCallState("live");
 
-        // 1. Force Web Audio Context to resume on user click (Browser Autoplay Policy fix)
+        //1. Force Web Audio Context to resume on user click (Browser Autoplay Policy fix)
         if (!outputAudioCtxRef.current) {
           outputAudioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
         }
@@ -239,15 +273,15 @@ export default function PrepLiveArena() {
           await outputAudioCtxRef.current.resume();
         }
 
-        // Step A: Send Handshake Setup Payload
+        //Step A: Send Handshake Setup Payload
         ws.send(JSON.stringify({ setup: config }));
 
-        // Send initial trigger turn to force Gemini to open the viva session
+        //Send initial trigger turn to force Gemini to open the viva session
         const openingPrompt = activeBlueprint?.subjectTitle
           ? `The candidate has joined the call for the ${activeBlueprint.subjectTitle} viva session. Please introduce yourself briefly and ask the first scenario question.`
           : "The candidate has joined the call. Please start the prep. session now with your welcoming opener and introductory question.";
 
-        // Step B: Explicitly trigger Gemini to speak the opening line
+        //Step B: Explicitly trigger Gemini to speak the opening line
         ws.send(
           JSON.stringify({
             clientContent: {
@@ -267,11 +301,11 @@ export default function PrepLiveArena() {
           }),
         );
 
-        // Step C: Start User Microphone Capture & Audio Streaming
+        //Step C: Start User Microphone Capture & Audio Streaming
         initMicrophoneStream(ws);
         //initMicrophoneStream(ws).then(()=> console.log("mic stream working and on.."));
 
-        // Add welcome message to transcript drawer
+        //Add welcome message to transcript drawer
         setTranscript((prev) => [
           ...prev,
           {
@@ -299,7 +333,7 @@ export default function PrepLiveArena() {
             return;
         }
 
-        // Step C: Play Incoming 24kHz Native PCM Audio Chunks from Gemini
+        //Step C: Play Incoming 24kHz Native PCM Audio Chunks from Gemini
         if (response.serverContent?.modelTurn?.parts) {
           for (const part of response.serverContent.modelTurn.parts) {
             if (part.inlineData?.mimeType?.startsWith("audio/")) {
@@ -336,7 +370,7 @@ export default function PrepLiveArena() {
           }
         }
 
-        // 4. Handle Candidate / User Speech Transcription (inputTranscription)
+        //4. Handle Candidate / User Speech Transcription (inputTranscription)
         if (response.serverContent?.inputTranscription?.text) {
           const candidateText = response.serverContent.inputTranscription.text.trim();
 
@@ -355,19 +389,19 @@ export default function PrepLiveArena() {
           }
         }
 
-        // //Capture candidate speech transcript turns if generated by WebSocket
-        // if (response.serverContent?.turnComplete && response.serverContent?.userTurn?.parts) {
-        //   const userText = response.serverContent.userTurn.parts.map((p) => p.text).join(" ");
-        //   console.log("User just said-> ", userText);
-        //   if (userText) {
-        //     setTranscript((prev) => [
-        //       ...prev,
-        //       { role: "candidate", text: userText, timestamp: new Date().toLocaleTimeString() },
-        //     ]);
-        //     // Trigger Agent 3 Evaluation
-        //     runTurnEvaluation(userText);
-        //   }
-        // }
+        ////Capture candidate speech transcript turns if generated by WebSocket
+        //if (response.serverContent?.turnComplete && response.serverContent?.userTurn?.parts) {
+        //  const userText = response.serverContent.userTurn.parts.map((p) => p.text).join(" ");
+        //  console.log("User just said-> ", userText);
+        //  if (userText) {
+        //    setTranscript((prev) => [
+        //      ...prev,
+        //      { role: "candidate", text: userText, timestamp: new Date().toLocaleTimeString() },
+        //    ]);
+        //    //Trigger Agent 3 Evaluation
+        //    runTurnEvaluation(userText);
+        //  }
+        //}
 
         //Step D: Handle Native Interruption (Candidate spoke while Examiner was answering)
         if (response.serverContent?.interrupted) {
@@ -376,7 +410,7 @@ export default function PrepLiveArena() {
           setCallState("live");
         }
 
-        // Turn Complete
+        //Turn Complete
         if (response.serverContent?.turnComplete) {
           setCallState("live");
         }
@@ -503,7 +537,7 @@ export default function PrepLiveArena() {
     }
   };
 
-  // Capture Microphone and Stream 16kHz PCM to Gemini
+  //Capture Microphone and Stream 16kHz PCM to Gemini
   const initMicrophoneStream = async (ws) => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -520,7 +554,7 @@ export default function PrepLiveArena() {
       //const processor = audioCtx.createScriptProcessor(2048, 1, 1);
       const processor = new AudioWorkletNode(audioCtx, 'pcm-processor', {
         //numberOfInputs: 1,
-        //numberOfOutputs: 1, // CRITICAL: Stop node from recycling due to empty speaker data
+        //numberOfOutputs: 1, //CRITICAL: Stop node from recycling due to empty speaker data
         //outputChannelCount: [1]
       });
       console.log("Socket open and listening actively");
@@ -529,23 +563,23 @@ export default function PrepLiveArena() {
       processor.port.onmessage = (e) => {
         if (ws && ws.readyState === WebSocket.OPEN) {
           //const inputData = e.inputBuffer.getChannelData(0);
-          // Convert Float32 samples to Int16 PCM
+          //Convert Float32 samples to Int16 PCM
           //const pcm16 = new Int16Array(inputData.length);
           
           //console.log("Socket open and listening actively");
           const pcmBuffer = e.data;
           const pcm16 = new Int16Array(pcmBuffer);
         
-        //   for (let i = 0; i < inputData.length; i++) {
-        //     pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7fff;
-        //   }
+        //  for (let i = 0; i < inputData.length; i++) {
+        //    pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7fff;
+        //  }
 
-          // Convert to Base64 string
+          //Convert to Base64 string
           const base64Audio = btoa(
             String.fromCharCode(...new Uint8Array(pcm16.buffer))
           );
 
-          // Stream audio chunk to Gemini WebSocket
+          //Stream audio chunk to Gemini WebSocket
           ws.send(
             JSON.stringify({
               realtimeInput: {
@@ -571,7 +605,7 @@ export default function PrepLiveArena() {
     }
   };
 
-  // Decode and Schedule 24kHz Audio Playback
+  //Decode and Schedule 24kHz Audio Playback
   const playAudioChunk24kHz = (base64PCM) => {
     if (!outputAudioCtxRef.current) {
       outputAudioCtxRef.current = new (window.AudioContext ||
@@ -584,7 +618,7 @@ export default function PrepLiveArena() {
       audioCtx.resume();
     }
 
-    // Convert Base64 back to PCM Int16 Array
+    //Convert Base64 back to PCM Int16 Array
     const binaryString = atob(base64PCM);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
@@ -592,13 +626,13 @@ export default function PrepLiveArena() {
     }
     const int16Data = new Int16Array(bytes.buffer);
 
-    // Convert Int16 to Float32 for Web Audio API
+    //Convert Int16 to Float32 for Web Audio API
     const float32Data = new Float32Array(int16Data.length);
     for (let i = 0; i < int16Data.length; i++) {
       float32Data[i] = int16Data[i] / 32768.0;
     }
 
-    // Create AudioBuffer
+    //Create AudioBuffer
     const audioBuffer = audioCtx.createBuffer(1, float32Data.length, 24000);
     audioBuffer.getChannelData(0).set(float32Data);
 
@@ -606,14 +640,14 @@ export default function PrepLiveArena() {
     source.buffer = audioBuffer;
     source.connect(audioCtx.destination);
 
-    // Schedule seamlessly in sequence
+    //Schedule seamlessly in sequence
     const currentTime = audioCtx.currentTime;
     const startTime = Math.max(currentTime, nextStartTimeRef.current);
     source.start(startTime);
     nextStartTimeRef.current = startTime + audioBuffer.duration;
   };
 
-  // Clear Audio Playback Queue on Interruption
+  //Clear Audio Playback Queue on Interruption
   const flushAudioPlayback = () => {
     if (outputAudioCtxRef.current) {
       outputAudioCtxRef.current.close();
@@ -622,7 +656,7 @@ export default function PrepLiveArena() {
     }
   };
 
-  // Append items to text transcript drawer
+  //Append items to text transcript drawer
   const appendTranscript = (role, text) => {
     setTranscript((prev) => {
       const last = prev[prev.length - 1];
@@ -636,7 +670,7 @@ export default function PrepLiveArena() {
     });
   };
 
-  // Gracefully End Call and Teardown Connections
+  //Gracefully End Call and Teardown Connections
   const endCall = () => {
     if (wsRef.current) {
       wsRef.current.close();
@@ -675,8 +709,8 @@ export default function PrepLiveArena() {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-between p-6 relative font-sans overflow-hidden">
       {/* Top Bar */}
-      <header className="w-full max-w-lg flex justify-between items-center py-2 z-10">
-        <div className="flex items-center gap-2">
+      <header className="w-full max-w-4xl flex flex-col md:flex-row justify-between items-center py-2 z-10">
+        <div className="flex items-center gap-2 mb-4 md:mb-0">
           <span
             className={`w-3 h-3 rounded-full ${
               callState === "live" || callState === "speaking"
@@ -686,7 +720,7 @@ export default function PrepLiveArena() {
                 : "bg-slate-600"
             }`}
           ></span>
-          <h1 className="text-lg font-semibold tracking-wide text-indigo-300">
+          <h1 className="text-lg font-semibold tracking-wide text-indigo-300" onClick={()=> console.log(persona)}>
             Speak2Prep Live Call
           </h1>
         </div>
@@ -696,7 +730,7 @@ export default function PrepLiveArena() {
           value={persona}
           onChange={(e) => setPersona(e.target.value)}
           disabled={callState !== "idle"}
-          className="bg-slate-900 border border-slate-800 text-slate-300 text-xs rounded-full px-3 py-1.5 focus:outline-none disabled:opacity-50"
+          className="bg-slate-900 border border-slate-800 text-slate-300 text-xs rounded-full mb-4 md:mb-0 px-3 py-1.5 focus:outline-none disabled:opacity-50"
         >
           <option value="STRICT_PROFESSOR">Strict Professor</option>
           <option value="FRIENDLY_TUTOR">Friendly Tutor</option>
@@ -706,13 +740,48 @@ export default function PrepLiveArena() {
         {/* Topic/Material Selector Window */}
         <button
           onClick={() => setIsSyllabusModalOpen(true)}
-          className="text-xs bg-slate-900 border border-slate-800 hover:border-slate-700 px-3 py-1.5 rounded-lg text-indigo-300 flex items-center gap-1.5 transition"
+          className="text-xs bg-slate-900 border border-slate-800 hover:border-slate-700 mb-4 md:mb-0 px-3 py-1.5 rounded-lg text-indigo-300 flex items-center gap-1.5 transition"
         >
           <span>📚 Blueprint:</span>
           <span className="font-semibold text-slate-200">
             {activeBlueprint?.subjectTitle || "Default Syllabus"}
           </span>
         </button>
+
+        {/* User Auth Profile Badge */}
+        {user ? (
+          <div className="flex items-center gap-2 bg-slate-900 border border-slate-800 p-1 pl-2.5 rounded-xl text-xs">
+            <span className="text-slate-300 font-medium max-w-25 truncate">
+              {user?.displayName || user?.email}
+            </span>
+            {user?.photoURL ? (
+              <img
+                src={user?.photoURL}
+                alt="Avatar"
+                className="w-6 h-6 rounded-lg border border-slate-700"
+              />
+            ) : (
+              <div className="w-6 h-6 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-[10px]">
+                {user?.email?.[0].toUpperCase()}
+              </div>
+            )}
+            <button
+              onClick={signout}
+              title="Sign Out"
+              className="text-rose-400  hover:text-rose-600 p-1 transition cursor-pointer"
+            >
+              Logout ➜]
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setIsLoginModalOpen(true)}
+            className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4.5 py-2.5 rounded-lg transition cursor-pointer"
+          >
+            Sign In
+          </button>
+        )}
+
       </header>
 
       {/* Agent 3 Real-time Evaluation HUD */}
@@ -932,7 +1001,7 @@ export default function PrepLiveArena() {
               <div className="pt-2 text-center">
                 <button
                   onClick={() => setCallState("idle")}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs px-6 py-2.5 rounded-xl transition"
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs px-6 py-2.5 rounded-xl transition cursor-pointer"
                 >
                   Roast me again!
                 </button>
@@ -949,40 +1018,53 @@ export default function PrepLiveArena() {
       {/* Call Control Footer */}
       <footer className="w-full max-w-lg flex flex-col items-center gap-4 z-10">
         <div className="flex items-center gap-6 w-full justify-center">
-          {/* Transcript Toggle */}
-          <button
-            onClick={() => setShowTranscript(!showTranscript)}
-            className="p-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-full text-slate-400 hover:text-white transition"
-            title="Toggle Transcript Drawer"
-          >
-            💬
-          </button>
+          <div className="flex flex-col items-center">
+            {/* Transcript Toggle */}
+            <button
+              onClick={() => setShowTranscript(!showTranscript)}
+              className="p-3 bg-slate-700 hover:bg-slate-500 border border-slate-400 rounded-full text-slate-400 hover:text-white transition cursor-pointer"
+              title="Toggle Transcript Drawer"
+            >
+              💬
+            </button>
+            <p className="text-gray-400 text-xs my-2"> Show Transcript </p>
+          </div>
 
           {/* Primary Call Action Button */}
-          {callState === "idle" ? (
-            <button
-              onClick={startCall}
-              className="w-20 h-20 bg-emerald-600 hover:bg-emerald-500 text-white rounded-full shadow-lg shadow-emerald-600/30 flex items-center justify-center text-3xl transition transform hover:scale-105"
-            >
-              📞
-            </button>
+          {callState === "idle" || callState === "scorecard" ? (
+            <div className="flex flex-col items-center">
+              <button
+                disabled={callState==="scorecard" ? true : false}
+                onClick={handleStartCall}
+                className="w-20 h-20 bg-gray-700 hover:bg-gray-500 border border-slate-400 text-white rounded-full shadow-lg shadow-emerald-600/30 flex items-center justify-center text-3xl transition transform hover:scale-105 cursor-pointer disabled:cursor-default"
+              >
+                📞
+              </button>
+              <p className="text-gray-400 text-sm my-2"> Start call </p>
+            </div>
           ) : (
-            <button
-              onClick={endCall}
-              className="w-20 h-20 bg-rose-600 hover:bg-rose-500 text-white rounded-full shadow-lg shadow-rose-600/30 flex items-center justify-center text-3xl transition animate-pulse transform hover:scale-105"
-            >
-              🛑
-            </button>
+            <div className="flex flex-col items-center">
+              <button
+                onClick={endCall}
+                className="w-20 h-20 bg-rose-600 hover:bg-rose-500 border border-rose-300 text-white rounded-full shadow-lg shadow-rose-600/30 flex items-center justify-center text-3xl transition animate-pulse transform hover:scale-105 cursor-pointer"
+              >
+                🛑
+              </button>
+              <p className="text-gray-400 text-sm my-2"> End call & View Score </p>
+            </div>
           )}
 
-          {/* Reset Session Button */}
-          <button
-            onClick={() => setTranscript([])}
-            className="p-3 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-full text-slate-400 hover:text-rose-400 transition"
-            title="Clear Transcript"
-          >
-            🔄
-          </button>
+          <div className="flex flex-col items-center">
+            {/* Reset Session Button */}
+            <button
+              onClick={() => setTranscript([])}
+              className="p-3 bg-slate-700 hover:bg-slate-500 border border-slate-400 rounded-full text-slate-400 hover:text-rose-400 transition cursor-pointer"
+              title="Clear Transcript"
+            >
+              🔄
+            </button>
+            <p className="text-gray-400 text-xs my-2"> Reset Transcript </p>
+          </div>
         </div>
 
         <p className="text-xs text-slate-500 text-center">
@@ -1005,6 +1087,12 @@ export default function PrepLiveArena() {
         onClose={() => setIsDrillModalOpen(false)}
         drill={activeDrill}
         isLoading={isGeneratingDrill}
+      />
+
+      {/* Auth Login Modal */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
       />
 
       {/* Collapsible Live Transcript Drawer */}
