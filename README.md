@@ -94,7 +94,7 @@ speak2prep/
 │   │   ├── generate-drill/    # Generate practice questions
 │   │   ├── generate-scorecard/# Create performance reports
 │   │   ├── prep-session/      # Initialize interview session
-│   │   ├── prep-turn/         # Prepare next question
+│   │   ├── prep-turn/         
 │   │   └── syllabus-parse/    # Parse curriculum input
 │   ├── components/             # React components
 │   │   ├── LoginModal.jsx     # Authentication UI
@@ -150,7 +150,6 @@ speak2prep/
 |----------|---------|
 | `/api/syllabus-parse` | Parse syllabus and generate curriculum blueprint |
 | `/api/prep-session` | Initialize interview session with AI examiner |
-| `/api/prep-turn` | Prepare next question in sequence |
 | `/api/generate-drill` | Generate practice drills on specific topics |
 | `/api/eval-turn` | Evaluate user's response to a question |
 | `/api/generate-scorecard` | Create comprehensive performance report |
