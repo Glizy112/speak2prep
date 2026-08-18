@@ -75,7 +75,7 @@ Perfect for:
    Navigate to `http://localhost:3000`
 
 ## 📖 How to Use
-The number of calls are limited to 3 per week for now, in order to remain under daily concurrent limits. Thanks for understanding!
+The number of calls are limited to 3 full session calls per account per week for now, in order to remain under daily concurrent limits. Thanks for understanding!
 1. **Sign In**: Create an account or log in with your credentials
 2. **Upload Syllabus**: Paste your course syllabus or interview topics
 3. **Select Your Role**: Choose the position you're preparing for
