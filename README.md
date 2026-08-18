@@ -75,7 +75,7 @@ Perfect for:
    Navigate to `http://localhost:3000`
 
 ## 📖 How to Use
-
+The number of calls are limited to 3 full session calls per account per week for now, in order to remain under daily concurrent limits. Thanks for understanding!
 1. **Sign In**: Create an account or log in with your credentials
 2. **Upload Syllabus**: Paste your course syllabus or interview topics
 3. **Select Your Role**: Choose the position you're preparing for
@@ -94,7 +94,7 @@ speak2prep/
 │   │   ├── generate-drill/    # Generate practice questions
 │   │   ├── generate-scorecard/# Create performance reports
 │   │   ├── prep-session/      # Initialize interview session
-│   │   ├── prep-turn/         # Prepare next question
+│   │   ├── prep-turn/         
 │   │   └── syllabus-parse/    # Parse curriculum input
 │   ├── components/             # React components
 │   │   ├── LoginModal.jsx     # Authentication UI
@@ -150,7 +150,6 @@ speak2prep/
 |----------|---------|
 | `/api/syllabus-parse` | Parse syllabus and generate curriculum blueprint |
 | `/api/prep-session` | Initialize interview session with AI examiner |
-| `/api/prep-turn` | Prepare next question in sequence |
 | `/api/generate-drill` | Generate practice drills on specific topics |
 | `/api/eval-turn` | Evaluate user's response to a question |
 | `/api/generate-scorecard` | Create comprehensive performance report |
@@ -197,10 +196,6 @@ Contributions are welcome! Please follow these steps:
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📝 License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## 🙏 Acknowledgments
 
 - Built with [Next.js](https://nextjs.org/)
@@ -214,4 +209,4 @@ Have questions or feedback? Please open an issue on GitHub or reach out to our t
 
 ---
 
-**Ready to ace your next big preparation? Start with Speak2Prep today! 🎓**
+**Ready to feel calm in your next big preparation? Start with Speak2Prep today! 🎓**
