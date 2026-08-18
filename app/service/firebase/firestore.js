@@ -67,10 +67,10 @@ export const checkAndIncrementCallLimit = async (uid) => {
 
     //Check if tier type is another one
     const tier = data?.tier || "free";
-    let callLimit = 2;
+    let callLimit = 3;
     
     if(tier === "paid") {
-        callLimit = 5;
+        callLimit = 6;
     }
     
     //Fallback to current date if `createdAt` timestamp is still committing
