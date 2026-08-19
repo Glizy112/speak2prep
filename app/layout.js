@@ -1,5 +1,7 @@
 import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "./context/AuthContext";
+import { Analytics } from "@vercel/analytics/next";
+//import FireAnalytics from "./components/FireAnalytics";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,6 +28,8 @@ export default function RootLayout({ children }) {
       <body className="min-h-full flex flex-col">
         <AuthProvider>
           {children}
+          <Analytics/>
+          {/* <FireAnalytics/> */}
         </AuthProvider>
       </body>
     </html>
